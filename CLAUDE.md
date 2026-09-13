@@ -117,5 +117,8 @@ project before using the form for real.
   knwn4official account or email anywhere in this project.
 - Vercel: project `astra-motions` (team taha-a-hashmis-projects), connected
   to the GitHub repo, so every push to `main` deploys production.
-  Live: https://astra-motions.vercel.app/ — no custom domain; the SEO URLs
-  in index.html point at the vercel.app URL.
+  Live: https://astra-motions-studio.vercel.app/ (project domain I claimed —
+  the bare astra-motions.vercel.app belongs to a stranger's unrelated project;
+  auto aliases astra-motions-kappa.vercel.app and
+  astra-motions-taha-a-hashmis-projects.vercel.app also resolve). No custom
+  domain; the SEO URLs in index.html point at astra-motions-studio.vercel.app.
