@@ -17,40 +17,40 @@ const esc = (s) =>
 function studioNotification(inq) {
   const subject = `Astra inquiry — ${inq.name} (${inq.budget})`;
   const text = [
-    `New inquiry from the site form`,
+    `New launch request from the site`,
     ``,
     `Name:    ${inq.name}`,
     `Email:   ${inq.email}`,
     `Budget:  ${inq.budget}`,
     `When:    ${inq.created_at}`,
     ``,
-    `— What they're building —`,
+    `— The project —`,
     inq.message,
     ``,
     `Reply directly to this email to answer them.`,
   ].join('\n');
   const html = `
     <div style="font-family:Manrope,Segoe UI,system-ui,sans-serif;background:#05060d;color:#f2f0ea;padding:32px;max-width:640px">
-      <p style="font-family:'DM Mono',Consolas,monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#efcd7a;margin:0 0 12px">New inquiry · site form</p>
+      <p style="font-family:'DM Mono',Consolas,monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#efcd7a;margin:0 0 12px">New launch request</p>
       <h1 style="font-size:22px;font-weight:500;margin:0 0 24px">${esc(inq.name)} — ${esc(inq.budget)}</h1>
       <table style="border-collapse:collapse;font-size:14px;color:#8b90a8">
         <tr><td style="padding:4px 16px 4px 0">Email</td><td style="color:#f2f0ea"><a href="mailto:${esc(inq.email)}" style="color:#efcd7a">${esc(inq.email)}</a></td></tr>
         <tr><td style="padding:4px 16px 4px 0">Received</td><td style="color:#f2f0ea">${esc(inq.created_at)}</td></tr>
       </table>
-      <p style="font-family:'DM Mono',Consolas,monospace;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#8b90a8;margin:28px 0 8px">What they're building</p>
+      <p style="font-family:'DM Mono',Consolas,monospace;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#8b90a8;margin:28px 0 8px">The project</p>
       <p style="font-size:15px;line-height:1.6;white-space:pre-wrap;margin:0;border-left:2px solid #efcd7a;padding-left:14px">${esc(inq.message)}</p>
     </div>`;
   return { subject, text, html };
 }
 
 function visitorReceipt(inq) {
-  const subject = `Received — Astra Motions`;
+  const subject = `Countdown started — Astra Motions`;
   const text = [
     `Hi ${inq.name},`,
     ``,
-    `Your message is in orbit. We read every inquiry ourselves and reply within 48 hours.`,
+    `Your message landed. Countdown started. We answer every message ourselves, usually within two days.`,
     ``,
-    `For reference, here's what you sent:`,
+    `Here is what you sent, for your records:`,
     ``,
     inq.message,
     ``,
@@ -60,9 +60,9 @@ function visitorReceipt(inq) {
   const html = `
     <div style="font-family:Manrope,Segoe UI,system-ui,sans-serif;background:#05060d;color:#f2f0ea;padding:32px;max-width:640px">
       <p style="font-family:'DM Mono',Consolas,monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#efcd7a;margin:0 0 12px">Received</p>
-      <h1 style="font-size:22px;font-weight:500;margin:0 0 20px">Your message is in orbit.</h1>
-      <p style="font-size:15px;line-height:1.6;color:#8b90a8;margin:0 0 24px">Hi ${esc(inq.name)} — we read every inquiry ourselves and reply within 48 hours.</p>
-      <p style="font-family:'DM Mono',Consolas,monospace;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#8b90a8;margin:0 0 8px">What you sent</p>
+      <h1 style="font-size:22px;font-weight:500;margin:0 0 20px">Your message landed. Countdown started.</h1>
+      <p style="font-size:15px;line-height:1.6;color:#8b90a8;margin:0 0 24px">Hi ${esc(inq.name)} — we answer every message ourselves, usually within two days.</p>
+      <p style="font-family:'DM Mono',Consolas,monospace;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#8b90a8;margin:0 0 8px">Your message</p>
       <p style="font-size:15px;line-height:1.6;white-space:pre-wrap;margin:0 0 32px;border-left:2px solid #1f2436;padding-left:14px">${esc(inq.message)}</p>
       <p style="font-size:13px;color:#8b90a8;margin:0">— Astra Motions<br/>Websites with their own gravity.</p>
     </div>`;

@@ -52,7 +52,7 @@ The passage between stages 2 and 4 is filled with drifting indigo debris
   planet ring and the star halo.
 - `src/scroll.js` — Lenis + ScrollTrigger scrub → single progress value.
 - `src/choreography.js` — maps `p` to camera spline, statement opacity/blur,
-  rail + HUD (altitude 100 km → 35,786 km; stage names GROUND/STAGE 0N/ASTRA),
+  rail + HUD (altitude 100 km → 35,786 km; stage names PAD/STAGE 0N/ORBIT),
   stage culling, nebula roll-in (`refs.cloudsFade`), star wake-up (light,
   sprite, ring emissive, core colour dim→lit) + nebula gold tint, Guide anchor.
 - `src/interactions.js` — Raycaster layer: planet crack/burst, Guide
@@ -60,12 +60,12 @@ The passage between stages 2 and 4 is filled with drifting indigo debris
   or a planet). Receives `fx.pixelPulse`; exposes `isHot()` for the cursor.
 - `src/contact.js` — contact overlay. POSTs to `/api/contact`; handles 422
   field errors, 429, and the sent state. Returns `{ show, hide, isOpen }`.
-- `src/sheets.js` + `src/sheets.css` — the Team and Work sheets and the
-  router for every `[data-open]` control (`team` / `work` / `contact`).
-  Scrollable sheet/contact panels carry `data-lenis-prevent`.
-  Team: Jack Frye (founder, `public/team/jack-frye.jpg`) and Shayan Fareed
-  (co-founder, `public/team/shayan-fareed.jpg`), 731×913 greyscale JPEGs.
-  Work: the same four reference sites as Apex (thumbnails in `public/work/`).
+- `src/sheets.js` + `src/sheets.css` — the Launch-log (work) sheet and the
+  router for every `[data-open]` control (`work` / `contact`). Scrollable
+  sheet/contact panels carry `data-lenis-prevent`. **There is no Team sheet
+  and no named people anywhere on the site** — the owner removed them on
+  2026-09-13; don't add portraits, names or founder metadata back. Work:
+  the same four reference sites as Apex (thumbnails in `public/work/`).
 
 ## Architecture — backend (`server/`)
 
@@ -88,6 +88,10 @@ project before using the form for real.
   only; the nebula tints (violet/teal/rose) stay in the background.
 - Type: Cormorant Garamond (display, 300/400/500 + italic), Manrope (body),
   DM Mono (instruments). The hero wordmark is Cormorant 400 tracked 0.18em.
+- Copy voice is launch/orbit, deliberately unlike Apex's cadence: stage
+  indexes Liftoff / Escape velocity / The studio / Deep field / Arrival;
+  CTA "Book a launch"; the work sheet is the "Launch log"; HUD reads
+  PAD … ORBIT and "SCROLL TO LIFT OFF" / "ORBIT REACHED". Keep it that way.
 - Ornament: `✦` flanks statement indexes and sheet eyebrows (no rules).
   Controls are 2px-radius rectangles; the glyph is a rotated-square
   "spark" (`.cta-dot`, `.header-contact .dot`, rail ticks, cursor dot).

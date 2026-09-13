@@ -27,7 +27,7 @@ function beatWindow(p, i, hold = 0.075, fade = 0.055) {
   return clamp01(1 - (d - hold) / fade);
 }
 
-const STAGE_NAMES = ['GROUND', 'STAGE 01', 'STAGE 02', 'STAGE 03', 'STAGE 04', 'ASTRA'];
+const STAGE_NAMES = ['PAD', 'STAGE 01', 'STAGE 02', 'STAGE 03', 'STAGE 04', 'ORBIT'];
 
 export function createChoreography({ camera, refs }) {
   /* ── Camera spline: one waypoint above/behind each beat ─────────────── */
@@ -116,7 +116,7 @@ export function createChoreography({ camera, refs }) {
       li.style.opacity = clamp01(w3 * ((w3 - delay * 0.3) / 0.7)).toFixed(3);
     });
 
-    /* Scroll hint: only while you're still on the ground */
+    /* Scroll hint: only while you're still on the pad */
     const hintGone = p > 0.03;
     if (hintGone !== lastHintGone) {
       scrollHint.classList.toggle('is-gone', hintGone);
@@ -130,7 +130,7 @@ export function createChoreography({ camera, refs }) {
       hudAlt.textContent = altText;
       lastAltText = altText;
     }
-    hudLabel.textContent = p > 0.94 ? 'ORBIT REACHED' : 'SCROLL TO ASCEND';
+    hudLabel.textContent = p > 0.94 ? 'ORBIT REACHED' : 'SCROLL TO LIFT OFF';
 
     /* Rail + stage readout */
     const stage = Math.round(seg);

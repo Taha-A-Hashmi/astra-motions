@@ -1,9 +1,9 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   sheets.css — the Team and Work sheets, plus the header's studio links.
+   sheets.css — the Launch-log sheet, plus the header's studio links.
    Same tokens as style.css: indigo glass, one gold light, mono instruments.
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* ── Header links (Work · Team · Contact us) ─────────────────────────── */
+/* ── Header links (Launch log · Book a launch) ─────────────────────────── */
 .header-link {
   background: none;
   border: 0;
@@ -144,8 +144,8 @@
 .sheet-close:hover,
 .sheet-close:focus-visible { color: var(--star); border-color: var(--haze); transform: rotate(90deg); background: rgba(12, 15, 28, 0.9); }
 .sheet-close:focus-visible { outline: 2px solid var(--star); outline-offset: 3px; }
-/* Tabs: the sheet's own way between Team and Work (the page header sits
-   under the glass while a sheet is open). */
+/* Tabs: the sheet's own label row (the page header sits under the glass
+   while a sheet is open). */
 .sheet-tabs {
   position: absolute;
   top: clamp(1.4rem, 3.2vw, 2.3rem);
@@ -313,64 +313,6 @@ body.sheet-open .overlay { opacity: 0; pointer-events: none; }
 .sheet-card:hover::before,
 .sheet-card:focus-within::before { opacity: 0.9; }
 
-/* ── Team ──────────────────────────────────────────────────────────────── */
-.team-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: clamp(1.2rem, 2.6vw, 2.2rem);
-  max-width: 58rem;
-}
-.person { padding: 0; }
-.person-photo {
-  position: relative;
-  aspect-ratio: 1 / 1;
-  overflow: hidden;
-  background: var(--ink);
-}
-.person-photo img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: 50% 12%;
-  display: block;
-  filter: grayscale(1) contrast(1.04);
-  transform: scale(1.02);
-  transition: transform 1.2s var(--ease-out), filter 0.8s ease;
-}
-.person:hover .person-photo img { transform: scale(1.06); filter: grayscale(0.85) contrast(1.06); }
-.person-photo::after {
-  /* the photo grounds into the card: indigo fade at the bottom edge */
-  content: '';
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 42%;
-  background: linear-gradient(to top, rgba(12, 15, 28, 0.96), transparent);
-  pointer-events: none;
-}
-.person-body {
-  position: relative;
-  padding: 1.5rem clamp(1.3rem, 2.4vw, 2rem) clamp(1.5rem, 2.4vw, 2rem);
-  margin-top: -2.2rem;
-  z-index: 2;
-}
-.person-role {
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  color: var(--gold);
-  margin-bottom: 0.6rem;
-}
-.person-name {
-  font-family: var(--display);
-  font-size: clamp(1.8rem, 3vw, 2.4rem);
-  font-weight: 400;
-  letter-spacing: 0;
-  line-height: 1.05;
-  margin-bottom: 0.7rem;
-}
-.person-bio { color: var(--haze); font-size: 0.94rem; line-height: 1.6; max-width: 30em; }
-
 /* ── Work ──────────────────────────────────────────────────────────────── */
 .work-grid {
   display: grid;
@@ -488,8 +430,7 @@ body.sheet-open .overlay { opacity: 0; pointer-events: none; }
 
 /* ── Small screens ────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
-  .team-grid, .work-grid { grid-template-columns: 1fr; }
-  .person-photo { aspect-ratio: 5 / 5; }
+  .work-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
   .header-nav { gap: 0.9rem; font-size: 0.6rem; }

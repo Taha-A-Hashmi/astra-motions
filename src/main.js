@@ -298,7 +298,7 @@ const greetingEl = document.querySelector('.veil-greeting');
 const barEl = document.querySelector('.veil-bar');
 const countEl = document.querySelector('.veil-count');
 
-const GREETINGS = ['Hello', 'Hola', 'Bonjour', 'Ciao', 'Olá', 'こんにちは', 'Salam', 'Hallo', 'नमस्ते'];
+const GREETINGS = ['Hello', 'Salut', 'Hej', 'Ciao', 'Hola', 'こんにちは', 'Merhaba', 'Olá', '안녕하세요'];
 
 // The ASTRA starline is rasterised from the brand serif; once the webfont is
 // actually in, lay the word out again so it is never the fallback face.
