@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 
 const procs = [
-  spawn('node', ['--env-file-if-exists=.env', '--disable-warning=ExperimentalWarning', '--watch', 'server/index.js'], { stdio: 'inherit', shell: true }),
+  spawn('node', ['--env-file-if-exists=.env', '--env-file-if-exists=.env.local', '--disable-warning=ExperimentalWarning', '--watch', 'server/index.js'], { stdio: 'inherit', shell: true }),
   spawn('npx', ['vite'], { stdio: 'inherit', shell: true }),
 ];
 const stop = () => {

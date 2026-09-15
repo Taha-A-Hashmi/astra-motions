@@ -1,4 +1,4 @@
-# Astra Motions
+# Astro Motions
 
 Immersive single-page WebGL site — one three.js scene, six stages, scroll to
 ascend from the ground into orbit — with its own small backend for the
@@ -22,6 +22,17 @@ npm start              # one process serves dist/ and /api on PORT (8787)
 
 Requires Node **22.13+** (the backend uses the built-in `node:sqlite`).
 
+## Editing the site (SEO dashboard)
+
+Open `/admin/` and sign in with the editor password (`ADMIN_TOKEN`). Every
+text, link, image and meta tag the schema exposes can be changed there and
+goes live within a minute — no rebuild. Storage is Vercel Blob in
+production and `data/cms/` locally.
+
+## Credits
+
+Planet, moon and Milky Way textures: [Solar System Scope](https://www.solarsystemscope.com/textures/), CC BY 4.0.
+
 ## Backend
 
 Everything is configured through `.env` — copy `.env.example` and fill in
@@ -35,7 +46,8 @@ saved to `data/inquiries.sqlite`, it just isn't emailed anywhere yet.
 | `RESEND_API_KEY` | Mail via [Resend](https://resend.com) — simplest option. |
 | `SMTP_HOST/PORT/USER/PASS` | …or any SMTP mailbox instead. |
 | `AUTO_REPLY` | Send the visitor a short "received" note (default `true`). |
-| `ADMIN_TOKEN` | Enables `GET /api/inquiries` (Bearer token). |
+| `ADMIN_TOKEN` | The `/admin/` editor password; also the Bearer token for `GET /api/inquiries`. |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob store for dashboard content + uploads (auto-set by the linked store). |
 | `ALLOWED_ORIGINS` | Extra origins allowed to POST; empty = same-origin only. |
 | `DATA_DIR` | Where the SQLite file lives (default `./data`). |
 

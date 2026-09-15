@@ -4,11 +4,15 @@
    camera's journey through them reads as a climb out of the atmosphere
    and into orbit.
 
-   Everything is procedural geometry — no downloaded models. Indigo rock,
-   one pale gold light (the star) and a violet nebula behind it all is the
-   whole visual system (Starlight).
+   Nothing here is sharp: planets are textured spheres (Solar System
+   Scope, CC BY 4.0), moons are moons, asteroids are lumpy rocks, and the
+   sky is a real Milky Way behind two layers of stars. One pale gold light
+   (the star) and a violet nebula behind it all is the visual system.
+
+   Every count is scaled by quality.particles so phones draw a third of it.
    ═══════════════════════════════════════════════════════════════════════ */
 import * as THREE from 'three';
+import { quality } from './quality.js';
 
 // Vertical / depth spacing between beats. Beat i center = (0, i*ELEV, -i*DEPTH)
 export const ELEV = 6;
@@ -19,7 +23,21 @@ export const beatCenter = (i) => new THREE.Vector3(0, i * ELEV, -i * DEPTH);
 
 const GOLD = 0xefcd7a;
 const STARWHITE = 0xfff1c4;
-const BASALT = 0x1f2542; // the indigo rock every solid thing is cut from
+
+const N = (n) => Math.max(8, Math.round(n * quality.particles));
+const SEG = (n) => Math.max(8, Math.round(n * quality.detail));
+
+/* ── Textures: lazy, tiered, shared ─────────────────────────────────── */
+const loader = new THREE.TextureLoader();
+const texCache = new Map();
+function tex(name, { srgb = true, aniso = true } = {}) {
+  if (texCache.has(name)) return texCache.get(name);
+  const t = loader.load(`/tex/${quality.textures}/${name}.jpg`);
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  if (aniso && quality.tier === 'high') t.anisotropy = 4;
+  texCache.set(name, t);
+  return t;
+}
 
 /* Small helper: a soft radial-gradient sprite texture for glows. */
 function makeGlowTexture() {
@@ -33,9 +51,9 @@ function makeGlowTexture() {
   g.addColorStop(1, 'rgba(239, 205, 122, 0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 /* Small helper: a soft round dot for every Points material. Without it,
@@ -67,14 +85,13 @@ function makeGoldDot(radius = 0.09) {
 }
 
 /* Small helper: a flat annulus of dust — a planetary ring, or the halo
-   of a star. Points in a tilted disc between two radii, with a soft
-   density falloff toward both edges so it reads as dust, not a stripe. */
+   of a star. Points in a tilted disc between two radii, biased toward the
+   middle of the band so it reads as dust, not a stripe. */
 function makeDustRing({ count, inner, outer, size, opacity, palette, thickness = 0.12 }) {
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;
-    // bias toward the middle of the band
     const u = (Math.random() + Math.random()) / 2;
     const r = inner + (outer - inner) * u;
     positions[i * 3 + 0] = Math.cos(a) * r;
@@ -107,8 +124,54 @@ function makeDustRing({ count, inner, outer, size, opacity, palette, thickness =
   );
 }
 
+/* Small helper: a flat ring whose UVs run radially, so a 1-D ring strip
+   texture (the Saturn-style alpha strip) wraps around it. */
+function makeBandRing(inner, outer, color, opacity) {
+  const geo = new THREE.RingGeometry(inner, outer, SEG(128), 1);
+  const pos = geo.attributes.position;
+  const uv = geo.attributes.uv;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    uv.setXY(i, (v.length() - inner) / (outer - inner), 0.5);
+  }
+  const map = loader.load('/tex/ring-alpha.png');
+  map.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({
+      map,
+      color,
+      transparent: true,
+      opacity,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  return mesh;
+}
+
+/* Small helper: an asteroid — a low-poly sphere pushed in and out by
+   position-only noise, so it reads as a worn rock rather than a crystal. */
+function makeAsteroidGeometry(seed) {
+  const geo = new THREE.SphereGeometry(1, SEG(14), SEG(10));
+  const pos = geo.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const n =
+      Math.sin(v.x * 2.3 + seed) * Math.cos(v.y * 2.9 + seed * 0.7) * 0.5 +
+      Math.sin((v.y + v.z) * 3.7 + seed) * 0.3;
+    v.multiplyScalar(1 + n * 0.28);
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
 /* Nebula curtain: a big additive plane whose fragment shader draws slow,
-   streaked light with fbm noise. Sits far behind the ascent, fog-free. */
+   billowing light with fbm noise. Sits far behind the ascent, fog-free. */
 function makeNebulaCurtain({ width, height, position, colorA, colorB, seed, opacity }) {
   const material = new THREE.ShaderMaterial({
     uniforms: {
@@ -142,7 +205,6 @@ function makeNebulaCurtain({ width, height, position, colorA, colorB, seed, opac
       void main() {
         float t = uTime * 0.035;
         float x = vUv.x * 3.0 + uSeed;
-        // nebula: billowing, not streaked — two fbm layers at different scales
         float cloud = fbm(vec2(x * 1.6 + t, vUv.y * 1.3 - t * 0.4));
         float wisp = fbm(vec2(x * 4.5 - t * 0.9, vUv.y * 3.0 + t * 0.2));
         float body = smoothstep(0.32, 0.9, cloud) * (0.6 + 0.4 * wisp);
@@ -168,30 +230,45 @@ export function createWorld(scene) {
   const refs = {};
 
   /* ── Atmosphere ─────────────────────────────────────────────────────── */
-  // Dense enough that each beat only *hints* at the next — and the hero
-  // stays clean of everything further up.
   scene.fog = new THREE.FogExp2(0x05060d, 0.021);
   scene.background = new THREE.Color(0x05060d);
 
-  // Base light: cool indigo hemisphere + a pale starlight key + violet fill
-  // from the opposite side so facets always separate from the void.
   scene.add(new THREE.HemisphereLight(0x2c3160, 0x0f1226, 1.35));
-  const key = new THREE.DirectionalLight(0xfff1d0, 1.95);
+  const key = new THREE.DirectionalLight(0xfff1d0, 2.1);
   key.position.set(6, 30, 8);
   scene.add(key);
   const fill = new THREE.DirectionalLight(0x7f8fc8, 0.6);
   fill.position.set(-10, -4, 14);
   scene.add(fill);
-  // violet rim from behind and below — the underside of every rock keeps
-  // a silhouette instead of dissolving into the void
   const rim = new THREE.DirectionalLight(0x8a7fd8, 0.42);
   rim.position.set(-6, -9, -10);
   scene.add(rim);
 
+  /* ── The Milky Way: a real sky behind everything ────────────────────────
+     An inside-out sphere large enough to wrap the whole ascent, fog-free,
+     tilted so the galactic band crosses the frame diagonally. */
+  {
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(230, SEG(40), SEG(22)),
+      new THREE.MeshBasicMaterial({
+        map: tex('milky-way', { aniso: false }),
+        side: THREE.BackSide,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+        fog: false,
+      })
+    );
+    sky.position.set(0, 15, -65);
+    sky.rotation.set(0.55, 0.4, 0.35);
+    sky.renderOrder = -20;
+    scene.add(sky);
+    refs.sky = sky;
+  }
+
   /* ── Stars: two layers surrounding the whole path ───────────────────────
      A dense field of fine dust plus a sparser layer of brighter, tinted
-     stars (white / ice-blue / lavender / teal / gold). The layers counter-
-     rotate and the bright layer twinkles — the sky is alive, not painted. */
+     stars. The layers counter-rotate and the bright layer twinkles. */
   function makeStarLayer(count, size, opacity, palette) {
     const positions = new Float32Array(count * 3);
     const colors = new Float32Array(count * 3);
@@ -233,17 +310,14 @@ export function createWorld(scene) {
   const lavender = new THREE.Color(0x9a86d8);
   const teal = new THREE.Color(0x5fa39a);
   const goldC = new THREE.Color(GOLD);
-  refs.stars = makeStarLayer(3000, 0.11, 0.55, [
+  refs.stars = makeStarLayer(N(4200), 0.11, 0.6, [
     [0.7, hazeC], [0.85, ice], [1.01, lavender],
   ]);
-  refs.starsBright = makeStarLayer(1400, 0.26, 0.9, [
+  refs.starsBright = makeStarLayer(N(2000), 0.26, 0.9, [
     [0.42, white], [0.6, ice], [0.78, lavender], [0.88, teal], [1.01, goldC],
   ]);
 
-  /* ── Nebula: slow billows of light far behind the ascent ───────────────
-     Three shader planes in violet, rose and teal, staggered up the climb
-     so every stage has a faint sky above it. Additive and fog-free, so
-     they read as light, not as haze. */
+  /* ── Nebula: slow billows of light far behind the ascent ─────────────── */
   refs.auroras = [
     makeNebulaCurtain({
       width: 150, height: 50, position: new THREE.Vector3(-18, 22, -80),
@@ -262,94 +336,58 @@ export function createWorld(scene) {
   refs.auroras[2].rotation.z = -0.05;
   for (const a of refs.auroras) scene.add(a);
 
-  /* ── STAGE 1 (beat 0) · GROUND — the dark planet, built from chunks ──────
-     Not one mesh but ~10 fragments of the same faceted sphere, each pivoted
-     at its own centroid. Assembled they read as one ringed world; the
-     interaction layer can crack them apart on hover and burst them on
-     click. A ring of gold dust circles it, and the logo's dot rides that
-     ring like a small moon. */
+  /* ── STAGE 1 (beat 0) · PAD — the ringed gas giant ──────────────────────
+     A smooth banded world, tinted toward the indigo of the palette, with
+     a broad Saturn-style ring, a dust ring for sparkle, and the logo's
+     gold dot riding the ring like a small moon. Hover warms it; click
+     sends a shockwave through the ring (interactions). */
   {
     const c = beatCenter(0);
-    const geo = new THREE.IcosahedronGeometry(2.3, 2).toNonIndexed();
-    const pos = geo.attributes.position;
-    // Displace vertices slightly so it reads as cut stone, not a platonic
-    // solid. (Same displacement for shared corners since it depends only
-    // on position.)
-    for (let i = 0; i < pos.count; i++) {
-      const v = new THREE.Vector3().fromBufferAttribute(pos, i);
-      const n = Math.sin(v.x * 3.1 + v.y * 2.7) * Math.cos(v.z * 2.3);
-      v.multiplyScalar(1 + n * 0.07);
-      pos.setXYZ(i, v.x, v.y, v.z);
-    }
+    const planet = new THREE.Mesh(
+      new THREE.SphereGeometry(2.3, SEG(56), SEG(36)),
+      new THREE.MeshStandardMaterial({
+        map: tex('gas-giant'),
+        color: 0x6d76b8, // cools and darkens the beige bands into the indigo palette
+        roughness: 1,
+        metalness: 0,
+        emissive: GOLD,
+        emissiveIntensity: 0, // hover warmth, tweened by interactions
+      })
+    );
+    planet.position.copy(c);
+    planet.rotation.z = 0.3;
+    planet.userData.pulse = 0; // interactions: click shockwave 0→1
+    scene.add(planet);
+    refs.planet = planet;
 
-    const material = new THREE.MeshStandardMaterial({
-      color: BASALT,
-      roughness: 0.3,
-      metalness: 0.5,
-      flatShading: true,
+    // the ring system: a banded disc plus fine dust, both tilted like the
+    // orbit on the logo
+    const rings = new THREE.Group();
+    rings.position.copy(c);
+    rings.rotation.set(0.42, 0, -0.28);
+    const band = makeBandRing(3.0, 5.6, 0xa89c7e, 0.5);
+    rings.add(band);
+    const dust = makeDustRing({
+      count: N(1400),
+      inner: 3.2,
+      outer: 5.8,
+      size: 0.07,
+      opacity: 0.75,
+      thickness: 0.1,
+      palette: [[0.4, goldC], [0.75, hazeC], [1.01, white]],
     });
-
-    const faceCount = pos.count / 3;
-    const CHUNKS = 10;
-    const facesPerChunk = Math.ceil(faceCount / CHUNKS);
-    const group = new THREE.Group();
-    group.position.copy(c);
-    refs.shardChunks = [];
-
-    for (let ci = 0; ci < CHUNKS; ci++) {
-      const start = ci * facesPerChunk;
-      const end = Math.min(faceCount, start + facesPerChunk);
-      if (start >= end) break;
-      const verts = new Float32Array((end - start) * 9);
-      for (let f = start; f < end; f++) {
-        for (let v = 0; v < 3; v++) {
-          const src = (f * 3 + v) * 3;
-          verts.set(
-            [pos.array[src], pos.array[src + 1], pos.array[src + 2]],
-            ((f - start) * 3 + v) * 3
-          );
-        }
-      }
-      const cg = new THREE.BufferGeometry();
-      cg.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-      // Pivot each chunk at its own centroid so it can fly out and back
-      cg.computeBoundingBox();
-      const centroid = new THREE.Vector3();
-      cg.boundingBox.getCenter(centroid);
-      cg.translate(-centroid.x, -centroid.y, -centroid.z);
-      cg.computeVertexNormals();
-
-      const chunk = new THREE.Mesh(cg, material);
-      chunk.position.copy(centroid);
-      chunk.userData.centroid = centroid.clone();
-      chunk.userData.dir = centroid.clone().normalize();
-      chunk.userData.sep = 0; // 0 = assembled; the interaction layer tweens this
-      chunk.userData.spin = new THREE.Vector3(
-        (Math.random() - 0.5) * 2,
-        (Math.random() - 0.5) * 2,
-        (Math.random() - 0.5) * 2
-      );
-      group.add(chunk);
-      refs.shardChunks.push(chunk);
-    }
-    scene.add(group);
-    refs.shard = group;
-
-    // the ring: a tilted disc of gold-and-haze dust — the first hint that
-    // this world is made of pieces
-    const ring = makeDustRing({
-      count: 1600,
-      inner: 3.3,
-      outer: 5.4,
-      size: 0.075,
-      opacity: 0.8,
-      thickness: 0.16,
-      palette: [[0.35, goldC], [0.75, hazeC], [1.01, white]],
-    });
-    ring.position.copy(c);
-    ring.rotation.set(0.42, 0, -0.28); // the same tilt the logo's orbit has
-    scene.add(ring);
-    refs.heroRing = ring;
+    rings.add(dust);
+    // the shockwave: a thin torus that expands out through the ring on click
+    const wave = new THREE.Mesh(
+      new THREE.TorusGeometry(1, 0.03, 8, SEG(96)),
+      new THREE.MeshBasicMaterial({ color: STARWHITE, transparent: true, opacity: 0, depthWrite: false })
+    );
+    wave.rotation.x = Math.PI / 2;
+    rings.add(wave);
+    scene.add(rings);
+    refs.heroRing = rings;
+    refs.heroBand = band;
+    refs.heroWave = wave;
 
     // The logo made literal: the gold dot riding the ring like a moon
     const dot = makeGoldDot(0.11);
@@ -360,25 +398,25 @@ export function createWorld(scene) {
     scene.add(dotLight);
     refs.heroDot = dot;
     refs.heroDotLight = dotLight;
+
+    // a small grey moon further out, for scale
+    const moon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42, SEG(24), SEG(16)),
+      new THREE.MeshStandardMaterial({ map: tex('moon'), color: 0x9da3bb, roughness: 1 })
+    );
+    moon.userData = { r: 7.4, phase: 2.1, speed: 0.09 };
+    scene.add(moon);
+    refs.heroMoon = moon;
   }
 
-  /* ── STAGE 2 (beat 1) · THE PROBLEM — the lattice of identical modules ──
-     Two counter-rotating rings of identical cubes: the way everyone
-     launches. Every module is outlined in a cold hairline — engineered,
-     interchangeable, and precisely as characterful as a spreadsheet.
-     Deliberately NOT interactive and deliberately unlit by any gold: the
-     obvious way has no light of its own, and it never responds to you. */
+  /* ── STAGE 2 (beat 1) · LIFTOFF — the belt of identical moons ───────────
+     Two counter-rotating rings of the same grey moon: the way everyone
+     launches. Interchangeable, unlit by any gold, never answering the
+     cursor. */
   {
     const c = beatCenter(1);
-    const modGeo = new THREE.BoxGeometry(1.05, 1.05, 1.05);
-    const modMat = new THREE.MeshStandardMaterial({
-      color: 0x141830,
-      roughness: 0.55,
-      metalness: 0.35,
-      flatShading: true,
-    });
-    const edgeGeo = new THREE.EdgesGeometry(modGeo);
-    const edgeMat = new THREE.LineBasicMaterial({ color: 0x5f6a9a, transparent: true, opacity: 0.4 });
+    const moonGeo = new THREE.SphereGeometry(0.55, SEG(24), SEG(16));
+    const moonMat = new THREE.MeshStandardMaterial({ map: tex('moon'), color: 0x666c88, roughness: 1 });
     refs.modules = [];
     refs.orbitals = [];
     const makeOrbital = (center, radius, count, tiltX, tiltZ, phase, dir) => {
@@ -389,34 +427,27 @@ export function createWorld(scene) {
       orbital.userData.dir = dir;
       for (let i = 0; i < count; i++) {
         const a = (i / count) * Math.PI * 2;
-        const mod = new THREE.Mesh(modGeo, modMat);
-        mod.add(new THREE.LineSegments(edgeGeo, edgeMat));
-        mod.position.set(Math.cos(a) * radius, 0, Math.sin(a) * radius);
-        mod.rotation.y = -a;
-        mod.userData.baseY = 0;
-        mod.userData.phase = phase + i * 0.7;
-        orbital.add(mod);
-        refs.modules.push(mod);
+        const m = new THREE.Mesh(moonGeo, moonMat);
+        m.position.set(Math.cos(a) * radius, 0, Math.sin(a) * radius);
+        m.rotation.y = Math.random() * Math.PI * 2;
+        m.userData.baseY = 0;
+        m.userData.phase = phase + i * 0.7;
+        orbital.add(m);
+        refs.modules.push(m);
       }
       scene.add(orbital);
       refs.orbitals.push(orbital);
       return orbital;
     };
-    // the wide outer ring sits low; the tighter inner ring above and behind.
-    // Both are pushed well past the beat center so the camera never rides
-    // inside them (and so they stay a distant silhouette from the ground).
     makeOrbital(new THREE.Vector3(c.x, c.y - 2.2, c.z - 9), 5.6, 14, 0.36, -0.08, 0, 1);
     makeOrbital(new THREE.Vector3(c.x + 1.2, c.y + 1.4, c.z - 11), 3.4, 9, -0.24, 0.14, 1.6, -1);
   }
 
-  /* ── STAGE 3 (beat 2) · THE TURN — the Guide appears ────────────────────
+  /* ── STAGE 3 (beat 2) · ESCAPE VELOCITY — the Guide appears ─────────────
      The gold dot from the logo's orbit, come alive: a warm wisp with a
-     flowing particle tail and a slow halo of indigo chips. It is introduced
-     here ("almost none keep you in orbit" — this one keeps you, and dodges
-     the cursor) and then travels ahead of the camera for the rest of the
-     ascent, through the starline and up to the star, where it merges with
-     the star itself. Its anchor is driven by choreography; idle motion
-     lives in tickWorld; shy/excite impulses come from interactions. */
+     flowing particle tail and a slow halo of gold sparks. Introduced
+     here, then travels ahead of the camera for the rest of the ascent and
+     merges with the star at the top. */
   {
     const c = beatCenter(2);
 
@@ -438,24 +469,19 @@ export function createWorld(scene) {
     sprite.position.copy(head.position);
     scene.add(sprite);
 
-    // halo: small indigo chips orbiting the head, catching its light
-    const chipGeo = new THREE.TetrahedronGeometry(0.1);
-    const chipMat = new THREE.MeshStandardMaterial({
-      color: 0x2b3054,
-      roughness: 0.3,
-      metalness: 0.5,
-      flatShading: true,
-    });
+    // halo: tiny gold sparks orbiting the head
+    const chipGeo = new THREE.SphereGeometry(0.05, 8, 8);
+    const chipMat = new THREE.MeshBasicMaterial({ color: GOLD });
     const chips = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 7; i++) {
       const chip = new THREE.Mesh(chipGeo, chipMat);
-      chip.userData.phase = (i / 8) * Math.PI * 2;
+      chip.userData.phase = (i / 7) * Math.PI * 2;
       scene.add(chip);
       chips.push(chip);
     }
 
     // tail: a ribbon of points following the head's recent positions
-    const TAIL = 150;
+    const TAIL = N(150);
     const tailPos = new Float32Array(TAIL * 3);
     const tailCol = new Float32Array(TAIL * 3);
     const headC = new THREE.Color(STARWHITE);
@@ -494,41 +520,32 @@ export function createWorld(scene) {
       sprite,
       chips,
       tail,
-      // during the descent, choreography re-aims this every frame at the
-      // header logo's gold dot (unprojected into the scene) — the Guide
-      // IS the dot from the mark, leaving the logo to lead the ascent
       origin: head.position.clone(),
-      anchor: head.position.clone(), // choreography moves this along the ascent
-      shy: new THREE.Vector3(),      // interactions: dodge-the-cursor impulse
-      excite: 0,                     // interactions: click delight
-      visible: 0,                    // choreography: fade-in at stage 3
-      merge: 0,                      // choreography: melt into the star at the top
+      anchor: head.position.clone(),
+      shy: new THREE.Vector3(),
+      excite: 0,
+      visible: 0,
+      merge: 0,
     };
   }
 
-  /* ── THE PASSAGE (stages 2 → 4) — debris and gold motes ─────────────────
-     The stretch between the lattice and the ASTRA starline was empty
-     space. Fill it with drifting indigo fragments (echoes of the stage-1
-     planet) and warm dust motes, so the climb always has something passing
-     by — and the Guide's light has things to catch on. */
+  /* ── THE PASSAGE (stages 2 → 4) — asteroids and gold motes ──────────────
+     Worn rocks drifting between the belt and the ASTRO starline, and warm
+     dust motes, so the climb always has something passing by. */
   {
-    const rockGeo = new THREE.IcosahedronGeometry(1, 0);
-    const rockMat = new THREE.MeshStandardMaterial({
-      color: BASALT,
-      roughness: 0.32,
-      metalness: 0.45,
-      flatShading: true,
-    });
+    const rockMat = new THREE.MeshStandardMaterial({ map: tex('rock'), color: 0x7f86a8, roughness: 1 });
+    const geos = [makeAsteroidGeometry(1.7), makeAsteroidGeometry(4.2), makeAsteroidGeometry(9.1)];
     refs.debris = [];
-    for (let i = 0; i < 44; i++) {
+    const count = N(36);
+    for (let i = 0; i < count; i++) {
       const t = 1.25 + Math.random() * 2.1; // spread from beat ~1.25 to ~3.35
-      const rock = new THREE.Mesh(rockGeo, rockMat);
+      const rock = new THREE.Mesh(geos[i % geos.length], rockMat);
       rock.position.set(
         (4 + Math.random() * 18) * (Math.random() < 0.5 ? -1 : 1),
         t * ELEV + (Math.random() - 0.5) * 9,
         -t * DEPTH + (Math.random() - 0.5) * 10
       );
-      rock.scale.setScalar(0.12 + Math.random() * 0.42);
+      rock.scale.setScalar(0.14 + Math.random() * 0.5);
       rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
       rock.userData.baseY = rock.position.y;
       rock.userData.phase = Math.random() * Math.PI * 2;
@@ -537,7 +554,7 @@ export function createWorld(scene) {
       refs.debris.push(rock);
     }
 
-    const MOTES = 90;
+    const MOTES = N(90);
     const motePos = new Float32Array(MOTES * 3);
     const moteCol = new Float32Array(MOTES * 3);
     const motePhase = new Float32Array(MOTES);
@@ -577,16 +594,15 @@ export function createWorld(scene) {
     scene.add(refs.motes);
   }
 
-  /* ── STAGE 4 (beat 3) · WHAT WE DO — the starline spells ASTRA ──────────
+  /* ── STAGE 4 (beat 3) · THE STUDIO — the starline spells ASTRO ──────────
      The name written in the sky. Particle positions are sampled from
      rasterised text, so the word hangs in space as a constellation. The
      cursor pushes through it (interactions) and the Guide flies through
-     it on its way up — both leave wakes. The word is laid out in the
-     brand serif, so `relayout()` is called again by main.js once the
-     webfont has actually loaded. */
+     it on its way up. `relayout()` is called again by main.js once the
+     brand serif has loaded. */
   {
     const c = beatCenter(3);
-    const count = 1400;
+    const count = N(1400);
     const positions = new Float32Array(count * 3);
     const colors = new Float32Array(count * 3);
     const starC = new THREE.Color(0xf2f0ea);
@@ -605,7 +621,7 @@ export function createWorld(scene) {
     refs.trail = new THREE.Points(
       geo,
       new THREE.PointsMaterial({
-        size: 0.17,
+        size: quality.particles < 0.6 ? 0.22 : 0.17,
         map: makePointTexture(),
         vertexColors: true,
         transparent: true,
@@ -617,7 +633,6 @@ export function createWorld(scene) {
     refs.trail.userData.center = c;
     refs.trail.userData.push = new Float32Array(count * 3);
 
-    // rasterise the word and sample lit pixels into the rest positions
     const relayout = () => {
       const tc = document.createElement('canvas');
       tc.width = 760;
@@ -628,7 +643,7 @@ export function createWorld(scene) {
       tctx.textBaseline = 'middle';
       tctx.fillStyle = '#fff';
       tctx.letterSpacing = '14px';
-      tctx.fillText('ASTRA', tc.width / 2 + 7, tc.height / 2);
+      tctx.fillText('ASTRO', tc.width / 2 + 7, tc.height / 2);
       const img = tctx.getImageData(0, 0, tc.width, tc.height).data;
       const lit = [];
       for (let y = 0; y < 200; y += 2) {
@@ -644,7 +659,6 @@ export function createWorld(scene) {
         arr[i * 3 + 1] = c.y + 2.3 + (0.5 - py / 200) * 3.4 + (Math.random() - 0.5) * 0.22;
         arr[i * 3 + 2] = c.z + (Math.random() - 0.5) * 1.4;
       }
-      // Kept for the interaction layer: rest positions + current cursor pushes
       refs.trail.userData.base = arr.slice();
       refs.trail.userData.push.fill(0);
       refs.trail.geometry.attributes.position.needsUpdate = true;
@@ -654,17 +668,14 @@ export function createWorld(scene) {
     scene.add(refs.trail);
   }
 
-  /* ── STAGE 5 (beat 4) · THROUGH THE NEBULA ──────────────────────────────
-     No rock here at all: the camera has left the atmosphere and skims a
-     rolling deck of nebula, violet and lavender, that fills the frame
-     below, then keeps riding above it on the way up to the star. Each
-     billboard is a lumpy multi-blob puff with a lit upper edge so the
-     deck reads as luminous gas seen from above, not fog. */
+  /* ── STAGE 5 (beat 4) · DEEP FIELD — through the nebula ─────────────────
+     The camera has left the atmosphere and skims a rolling deck of
+     violet nebula that fills the frame below, then keeps riding above it
+     on the way up to the star. */
   {
     const c4 = beatCenter(4);
     const c5 = beatCenter(5);
 
-    // puffy texture: clustered blobs, brighter toward the top of the puff
     const makeNebulaTexture = (seed) => {
       const size = 256;
       const canvas = document.createElement('canvas');
@@ -677,11 +688,10 @@ export function createWorld(scene) {
       };
       for (let i = 0; i < 9; i++) {
         const bx = 48 + rnd() * 160;
-        const by = 100 + rnd() * 92; // cluster in the lower 2/3
+        const by = 100 + rnd() * 92;
         const br = 34 + rnd() * 46;
-        const lit = 1 - (by - 100) / 92; // upper blobs glow more
+        const lit = 1 - (by - 100) / 92;
         const a = 0.13 + lit * 0.17;
-        // shadowed underside (deep violet) → lit crown (lavender-white)
         const g = ctx.createRadialGradient(bx, by, 0, bx, by, br);
         g.addColorStop(0, `rgba(${130 + lit * 100}, ${110 + lit * 110}, ${210 + lit * 45}, ${a})`);
         g.addColorStop(0.6, `rgba(92, 78, 160, ${a * 0.45})`);
@@ -689,7 +699,6 @@ export function createWorld(scene) {
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, size, size);
       }
-      // starlight along the top silhouette, shadow pooling in the base
       ctx.globalCompositeOperation = 'source-atop';
       const top = ctx.createLinearGradient(0, 60, 0, 200);
       top.addColorStop(0, 'rgba(240, 232, 255, 0.34)');
@@ -697,13 +706,15 @@ export function createWorld(scene) {
       top.addColorStop(1, 'rgba(24, 18, 60, 0.35)');
       ctx.fillStyle = top;
       ctx.fillRect(0, 0, size, size);
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      return tex;
+      const t = new THREE.CanvasTexture(canvas);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
     };
     const cloudTexes = [makeNebulaTexture(11), makeNebulaTexture(47), makeNebulaTexture(83)];
 
     refs.clouds = [];
+    // fewer, larger puffs on phones: overdraw is what hurts there
+    const grow = quality.particles < 0.6 ? 1.5 : 1;
     const addCloud = (x, y, z, s, opacity) => {
       const cloud = new THREE.Sprite(
         new THREE.SpriteMaterial({
@@ -717,15 +728,13 @@ export function createWorld(scene) {
       cloud.scale.set(s * 1.5, s * 0.85, 1);
       cloud.userData.baseX = x;
       cloud.userData.baseOpacity = opacity;
-      cloud.userData.baseScale = s;
+      cloud.userData.baseScale = s * grow;
       cloud.userData.speed = 0.025 + Math.random() * 0.045;
       cloud.userData.phase = Math.random() * Math.PI * 2;
       scene.add(cloud);
       refs.clouds.push(cloud);
     };
-
-    // the main deck: wide, deep, everywhere below the camera line
-    for (let i = 0; i < 110; i++) {
+    for (let i = 0; i < N(110); i++) {
       addCloud(
         c4.x + (Math.random() - 0.5) * 96,
         c4.y - 4.4 + (Math.random() - 0.5) * 3.2,
@@ -734,8 +743,7 @@ export function createWorld(scene) {
         0.13 + Math.random() * 0.14
       );
     }
-    // foreground puffs just under the camera — the deck reaches the frame edge
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < N(16); i++) {
       addCloud(
         c4.x + (Math.random() - 0.5) * 44,
         c4.y - 3.6 + (Math.random() - 0.5) * 1.6,
@@ -744,8 +752,7 @@ export function createWorld(scene) {
         0.16 + Math.random() * 0.1
       );
     }
-    // the corridor up to the star: you keep riding above these
-    for (let i = 0; i < 34; i++) {
+    for (let i = 0; i < N(34); i++) {
       const t = Math.random();
       addCloud(
         c4.x + (Math.random() - 0.5) * 48,
@@ -757,17 +764,15 @@ export function createWorld(scene) {
     }
   }
 
-  /* ── STAGE 6 (beat 5) · THE STAR ────────────────────────────────────────
+  /* ── STAGE 6 (beat 5) · ARRIVAL — the star ──────────────────────────────
      A gold core that only comes fully alight in the last fifth of the
      climb, wrapped in a tilted halo of dust and a thin ring, with two
-     small dark worlds in orbit catching its light. The Guide merges into
-     the core at the very top. */
+     real worlds in orbit catching its light. The Guide merges into the
+     core at the very top. */
   {
     const c = beatCenter(5);
-    // above the statement, not behind it — the words sit inside the ring
     const center = new THREE.Vector3(c.x, c.y + 3.6, c.z - 5);
 
-    // the core: the only true emitter up here — bright enough to bloom
     const core = new THREE.Mesh(
       new THREE.SphereGeometry(0.5, 32, 32),
       new THREE.MeshBasicMaterial({ color: 0x5a4c2a }) // choreography lifts this to STARWHITE
@@ -775,24 +780,22 @@ export function createWorld(scene) {
     core.position.copy(center);
     scene.add(core);
 
-    // a thin ring, dark until the star wakes and lights its edge
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(4.2, 0.035, 8, 160),
+      new THREE.TorusGeometry(4.2, 0.035, 8, SEG(160)),
       new THREE.MeshStandardMaterial({
         color: 0x2a2f52,
         roughness: 0.4,
         metalness: 0.6,
         emissive: GOLD,
-        emissiveIntensity: 0, // ramped in by choreography
+        emissiveIntensity: 0,
       })
     );
     ring.position.copy(center);
     ring.rotation.set(Math.PI / 2 + 0.42, 0.1, -0.28);
     scene.add(ring);
 
-    // the halo: a wide disc of gold dust in the same plane as the ring
     const halo = makeDustRing({
-      count: 2200,
+      count: N(2200),
       inner: 2.2,
       outer: 7.5,
       size: 0.09,
@@ -804,16 +807,16 @@ export function createWorld(scene) {
     halo.rotation.set(0.42, 0, -0.28);
     scene.add(halo);
 
-    // two small dark worlds in orbit — the "lesser summits" of this sky
-    const worldMat = new THREE.MeshStandardMaterial({
-      color: BASALT,
-      roughness: 0.45,
-      metalness: 0.4,
-      flatShading: true,
-    });
+    // two real worlds in orbit: a warm red one and a grey moon
     const planets = [
-      new THREE.Mesh(new THREE.IcosahedronGeometry(1.15, 1), worldMat),
-      new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 1), worldMat),
+      new THREE.Mesh(
+        new THREE.SphereGeometry(1.15, SEG(40), SEG(26)),
+        new THREE.MeshStandardMaterial({ map: tex('mars'), color: 0xffd8c2, roughness: 1 })
+      ),
+      new THREE.Mesh(
+        new THREE.SphereGeometry(0.7, SEG(32), SEG(20)),
+        new THREE.MeshStandardMaterial({ map: tex('moon'), color: 0xb8bcd0, roughness: 1 })
+      ),
     ];
     planets[0].userData = { r: 6.2, phase: 0.9, speed: 0.07, y: -2.6 };
     planets[1].userData = { r: 8.6, phase: 3.4, speed: 0.05, y: 1.4 };
@@ -822,24 +825,17 @@ export function createWorld(scene) {
       scene.add(p);
     }
 
-    const glowLight = new THREE.PointLight(GOLD, 0, 50, 1.8); // ramped in by choreography
+    const glowLight = new THREE.PointLight(GOLD, 0, 50, 1.8);
     glowLight.position.copy(center);
     scene.add(glowLight);
 
     const sprite = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: makeGlowTexture(),
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-      })
+      new THREE.SpriteMaterial({ map: makeGlowTexture(), transparent: true, opacity: 0, depthWrite: false })
     );
     sprite.scale.setScalar(12);
     sprite.position.copy(center);
     scene.add(sprite);
 
-    // `flare` is a click-impulse from the interaction layer; choreography
-    // folds it into the glow so the two never fight over intensity.
     refs.star = {
       core, ring, halo, planets, glowLight, sprite, center, flare: 0,
       coreDim: new THREE.Color(0x5a4c2a),
@@ -848,10 +844,9 @@ export function createWorld(scene) {
   }
 
   /* ── Per-stage object lists — choreography hides a stage's set once the
-     camera is far enough away that fog has already erased it. Keeps the
-     hero clean of the star and saves draw calls on the way. */
+     camera is far enough away that fog has already erased it. */
   refs.stageObjects = [
-    [refs.shard, refs.heroDot, refs.heroDotLight, refs.heroRing],
+    [refs.planet, refs.heroDot, refs.heroDotLight, refs.heroRing, refs.heroMoon],
     [...refs.orbitals],
     [],
     [refs.trail],
@@ -865,42 +860,43 @@ export function createWorld(scene) {
 /* Per-frame idle motion — independent of scroll. `reduced` disables it. */
 export function tickWorld(refs, elapsed, reduced) {
   if (reduced) return;
-  if (refs.shard) {
-    refs.shard.rotation.y = elapsed * 0.1;
-    refs.shard.rotation.x = Math.sin(elapsed * 0.2) * 0.06;
-    // Chunks sit at centroid + dir·sep — sep is tweened by the interaction
-    // layer (0 assembled, ~0.1 hover-crack, ~2 burst)
-    for (const chunk of refs.shardChunks) {
-      const { centroid, dir, sep, spin } = chunk.userData;
-      chunk.position.set(
-        centroid.x + dir.x * sep,
-        centroid.y + dir.y * sep,
-        centroid.z + dir.z * sep
-      );
-      chunk.rotation.set(spin.x * sep * 0.6, spin.y * sep * 0.6, spin.z * sep * 0.6);
-    }
-    // the dust ring turns slowly; the gold dot rides it like a moon
-    const ring = refs.heroRing;
-    ring.rotation.y = elapsed * 0.05;
+  if (refs.planet) {
+    const p = refs.planet;
+    p.rotation.y = elapsed * 0.06;
+    const pulse = p.userData.pulse;
+    p.scale.setScalar(1 + Math.sin(pulse * Math.PI) * 0.05);
+    // the ring system turns slowly; the gold dot rides it like a moon
+    const rings = refs.heroRing;
+    rings.rotation.y = elapsed * 0.05;
     const a = -elapsed * 0.22;
     const local = refs.heroDot.position;
     local.set(Math.cos(a) * 4.5, Math.sin(elapsed * 0.9) * 0.08, Math.sin(a) * 4.5);
-    ring.localToWorld(local);
+    rings.localToWorld(local);
     refs.heroDotLight.position.copy(local);
+    // the shockwave: radius 2.4 → 9 as pulse runs 0 → 1, fading out
+    const w = refs.heroWave;
+    w.visible = pulse > 0.001 && pulse < 0.999;
+    if (w.visible) {
+      w.scale.setScalar(2.4 + pulse * 6.6);
+      w.material.opacity = (1 - pulse) * 0.9;
+    }
+    const m = refs.heroMoon;
+    const ma = elapsed * m.userData.speed + m.userData.phase;
+    const c0 = beatCenter(0);
+    m.position.set(c0.x + Math.cos(ma) * m.userData.r, c0.y + Math.sin(ma) * 1.6, c0.z + Math.sin(ma) * m.userData.r * 0.5);
+    m.rotation.y = ma * 1.5;
   }
   if (refs.orbitals) {
-    // the lattice turns like clockwork: each ring in its own direction,
-    // modules breathing a little on top of that
     for (const orbital of refs.orbitals) {
       orbital.rotation.y = elapsed * 0.09 * orbital.userData.dir + orbital.userData.phase;
     }
     for (const mod of refs.modules) {
       mod.position.y = mod.userData.baseY + Math.sin(elapsed * 0.5 + mod.userData.phase) * 0.12;
+      mod.rotation.y += 0.002;
     }
   }
   if (refs.guide) {
     const g = refs.guide;
-    // idle orbit around the anchor + shy dodge, all scaled by visibility
     const wander = 1 - g.merge * 0.7;
     g.head.position.set(
       g.anchor.x + Math.sin(elapsed * 1.25) * 0.6 * wander + g.shy.x,
@@ -910,14 +906,12 @@ export function tickWorld(refs, elapsed, reduced) {
     const vis = g.visible * (1 - g.merge);
     const scale = 0.4 + 0.6 * g.visible;
     g.head.scale.setScalar(scale * (1 - g.merge * 0.65));
-    g.head.material.opacity = 1; // MeshBasic — visibility rides on scale/light
     g.head.visible = g.visible > 0.02;
     g.light.position.copy(g.head.position);
     g.light.intensity = (10 + g.excite * 16) * vis + g.merge * 4;
     g.sprite.position.copy(g.head.position);
     g.sprite.material.opacity = 0.85 * vis;
     g.sprite.scale.setScalar(3.2 * scale + g.excite * 1.4);
-    // chips orbit faster when excited
     const spin = elapsed * (0.9 + g.excite * 2.6);
     g.chips.forEach((chip, i) => {
       const a = spin + chip.userData.phase;
@@ -927,11 +921,9 @@ export function tickWorld(refs, elapsed, reduced) {
         g.head.position.y + Math.sin(elapsed * 1.2 + i * 1.3) * 0.35 * scale,
         g.head.position.z + Math.sin(a) * r
       );
-      chip.rotation.set(a, a * 0.7, 0);
       chip.visible = vis > 0.05;
-      chip.scale.setScalar(1 - g.merge);
+      chip.scale.setScalar((1 - g.merge) * (0.7 + 0.3 * Math.sin(elapsed * 3 + i)));
     });
-    // tail: shift history back one slot, write the head at the front
     const tp = g.tail.geometry.attributes.position.array;
     tp.copyWithin(3, 0, tp.length - 3);
     tp[0] = g.head.position.x + (Math.random() - 0.5) * 0.06;
@@ -941,8 +933,9 @@ export function tickWorld(refs, elapsed, reduced) {
     g.tail.material.opacity = 0.85 * vis;
   }
   if (refs.clouds) {
-    const fade = refs.cloudsFade ?? 1; // choreography: deck rolls in after the starline
+    const fade = refs.cloudsFade ?? 1;
     for (const cloud of refs.clouds) {
+      if (!cloud.visible) continue;
       const { baseX, baseOpacity, baseScale, speed, phase } = cloud.userData;
       cloud.position.x = baseX + Math.sin(elapsed * speed + phase) * 4;
       cloud.material.opacity = baseOpacity * fade * (0.82 + Math.sin(elapsed * 0.3 + phase) * 0.18);
@@ -977,11 +970,9 @@ export function tickWorld(refs, elapsed, reduced) {
     }
     refs.motes.geometry.attributes.position.needsUpdate = true;
   }
-  if (refs.stars) {
-    refs.stars.rotation.y = elapsed * 0.004;
-  }
+  if (refs.sky) refs.sky.rotation.y = 0.4 + elapsed * 0.002;
+  if (refs.stars) refs.stars.rotation.y = elapsed * 0.004;
   if (refs.starsBright) {
-    // counter-rotate and twinkle the bright layer
     refs.starsBright.rotation.y = -elapsed * 0.0055;
     refs.starsBright.material.opacity = 0.75 + Math.sin(elapsed * 1.6) * 0.18;
   }

@@ -1,6 +1,6 @@
 {
-  "name": "Astra Motions",
-  "short_name": "Astra",
+  "name": "Astro Motions",
+  "short_name": "Astro",
   "description": "Immersive WebGL websites for a select few clients. Websites with their own gravity.",
   "start_url": "/",
   "display": "standalone",

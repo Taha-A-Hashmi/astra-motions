@@ -23,13 +23,13 @@ export const config = {
   /* Where inquiries land. Serverless filesystems are read-only except
      /tmp, so on Vercel the SQLite file is ephemeral — email is the durable
      channel there. Locally / on a VPS, DATA_DIR persists. */
-  dataDir: env('DATA_DIR', onVercel ? path.join(os.tmpdir(), 'astra-data') : path.resolve('data')),
+  dataDir: env('DATA_DIR', onVercel ? path.join(os.tmpdir(), 'astro-data') : path.resolve('data')),
 
   /* ── Mail ─────────────────────────────────────────────────────────────
           Vercel project env). Delivery order of preference: Resend (HTTP, no SMTP needed) → SMTP →
      none (inquiries are stored and logged, nothing is sent). */
   contactTo: env('CONTACT_TO'),
-  contactFrom: env('CONTACT_FROM', 'Astra Motions <onboarding@resend.dev>'),
+  contactFrom: env('CONTACT_FROM', 'Astro Motions <onboarding@resend.dev>'),
   resendApiKey: env('RESEND_API_KEY'),
   smtp: {
     host: env('SMTP_HOST'),

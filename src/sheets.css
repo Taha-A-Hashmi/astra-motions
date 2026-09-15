@@ -444,3 +444,7 @@ body.sheet-open .overlay { opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .tilt, .tilt.is-hot { transform: none; transition: none; }
 }
+
+/* ── Credits line under the sheet footer ──────────────────────────────── */
+.sheet-credit { margin-top: 1.4rem; font-family: var(--mono); font-size: 0.58rem; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(139, 144, 168, 0.6); }
+.sheet-credit a { color: inherit; }

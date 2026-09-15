@@ -9,7 +9,9 @@
      GET  /api/inquiries           admin: list   (Bearer ADMIN_TOKEN)
      GET  /api/inquiries/:id       admin: one
      PATCH /api/inquiries/:id      admin: { status }
-     *                             the built site from dist/ (production)
+     /api/content, /api/admin/*    the SEO dashboard (server/cms.js)
+     GET  /                        dist/shell.html + dashboard content
+     *                             the rest of dist/ (production, local)
    ═══════════════════════════════════════════════════════════════════════ */
 import express from 'express';
 import path from 'node:path';
@@ -19,12 +21,16 @@ import { validateInquiry } from './validate.js';
 import { createRateLimiter } from './ratelimit.js';
 import { insertInquiry, markEmailed, listInquiries, getInquiry, setStatus, countInquiries } from './db.js';
 import { sendInquiry } from './mail.js';
+import { cmsRouter, shellHandler, readShell, shellSource } from './cms.js';
+import { storageInfo } from './content.js';
+import { uploadsDir } from './content.js';
 
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1); // Vercel / any reverse proxy sets X-Forwarded-For
-  app.use(express.json({ limit: '32kb' }));
+  // the dashboard's routes carry their own (larger) JSON parser
+  app.use((req, res, next) => (req.path.startsWith('/api/admin') || req.path === '/api/content' ? next() : express.json({ limit: '32kb' })(req, res, next)));
 
   /* ── Security headers + CORS ────────────────────────────────────────── */
   app.use((req, res, next) => {
@@ -43,8 +49,11 @@ export function createApp() {
 
   const api = express.Router();
 
-  api.get('/health', (req, res) => {
+  api.get('/health', async (req, res) => {
+    await readShell();
     res.json({
+      shell: shellSource,
+      cms: storageInfo(),
       ok: true,
       time: new Date().toISOString(),
       mail: mailConfigured()
@@ -135,13 +144,20 @@ export function createApp() {
     res.json({ ok: true });
   });
 
+  /* ── The SEO dashboard's API (see server/cms.js) ──────────────────── */
+  api.use(cmsRouter({ requireAdmin }));
+
   api.use((req, res) => res.status(404).json({ ok: false, error: 'Not found' }));
   app.use('/api', api);
 
-  /* ── Static site (production: `npm run build` then `npm start`) ─────── */
+  /* ── The page itself: dist/shell.html with the dashboard's content
+     injected. On Vercel `/` is rewritten here (vercel.json); every other
+     file in dist/ is served by the CDN. Locally Express serves both. ── */
+  app.get(['/', '/index.html'], shellHandler);
   const dist = path.resolve('dist');
-  if (!config.onVercel && fs.existsSync(dist)) {
-    app.use(express.static(dist, { index: 'index.html', maxAge: '1h' }));
+  if (!config.onVercel) {
+    if (fs.existsSync(dist)) app.use(express.static(dist, { index: 'index.html', maxAge: '1h' })); // dist has no root index.html — only /admin/
+    app.use('/uploads', express.static(uploadsDir(), { maxAge: '1d' }));
   }
 
   // JSON errors for bad bodies etc., never an HTML stack trace

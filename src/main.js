@@ -2,9 +2,14 @@
    main.js — bootstrap. Wires renderer + world + scroll + choreography
    together, adds the cinematic post pipeline, and runs the frame loop.
 
-   Post pipeline:  render → bloom (the star bleeds like real light)
-                          → grade (vignette + film grain)
-                          → output (tone mapping + color space)
+   Post pipeline (quality 'full'):
+       render → bloom (the star bleeds like real light)
+              → pixel (Samana-style break effect, free at rest)
+              → grade (vignette + film grain + edge chromatic split)
+              → output (tone mapping + color space)
+   'lite' drops the pixel pass and runs bloom at half resolution; 'none'
+   renders straight to the canvas. On top of that the frame loop watches
+   its own timing and steps the resolution down if frames keep missing.
    ═══════════════════════════════════════════════════════════════════════ */
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -14,46 +19,48 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import gsap from 'gsap';
+import { quality } from './quality.js';
 import { createWorld, tickWorld } from './world.js';
 import { createScroll } from './scroll.js';
 import { createChoreography } from './choreography.js';
 import { createInteractions } from './interactions.js';
 import { createContact } from './contact.js';
 import { createSheets } from './sheets.js';
+import { applyContent } from './content.js';
 
-const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const coarse = window.matchMedia('(pointer: coarse)').matches; // touch devices
+const { reduced, coarse } = quality;
+
+// Editable copy (the SEO dashboard) — in production the server has
+// already injected it into the HTML; in dev this fetches and applies it.
+applyContent();
 
 /* ── Renderer — fail soft if WebGL isn't available ──────────────────────── */
 const canvas = document.querySelector('canvas.webgl');
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: quality.antialias,
+    powerPreference: 'high-performance',
+  });
 } catch {
   document.querySelector('.veil').style.display = 'none';
   document.querySelector('.webgl-fail').hidden = false;
   throw new Error('WebGL unavailable');
 }
-// Phones pay dearly for pixels once bloom is in the chain — cap DPR harder.
-const maxDpr = coarse ? 1.75 : 2;
+let dpr = Math.min(window.devicePixelRatio, quality.maxDpr);
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr));
+renderer.setPixelRatio(dpr);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.45;
 
 /* ── Scene, camera, world ───────────────────────────────────────────────── */
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(
-  42,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  260
-);
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 260);
 scene.add(camera);
 
-// Environment reflections: without this, semi-metallic materials render
-// near-black. A neutral room env at low intensity gives the indigo rock its
-// glassy facet sheen without lifting the mood.
+// Environment reflections give the planets and the star's ring their
+// sheen. A neutral room env at low intensity, generated once.
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment()).texture;
 scene.environmentIntensity = 0.5;
@@ -66,17 +73,10 @@ const contact = createContact({ lenis: scroll.lenis });
 // view.dolly: how far the camera pushes forward while a sheet is open —
 // the scene leans in behind the glass. Tweened by sheets.js.
 const view = { dolly: 0 };
-// interactions and sheets are created after the post pipeline below, so
-// they can trigger the pixel-break pass through `fx`
 
 /* ── Post-processing ────────────────────────────────────────────────────── */
-// Grade: gentle vignette + animated grain. Subtle by design — at 0.03 the
-// grain reads as film texture, not noise.
 const GradeShader = {
-  uniforms: {
-    tDiffuse: { value: null },
-    uTime: { value: 0 },
-  },
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 } },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() {
@@ -93,21 +93,16 @@ const GradeShader = {
     void main() {
       vec2 dir = vUv - 0.5;
       float d = length(dir);
-      // lens: a whisper of chromatic split toward the frame edges
       float ca = 0.0028 * smoothstep(0.18, 0.85, d);
       vec4 c = texture2D(tDiffuse, vUv);
       c.r = texture2D(tDiffuse, vUv + dir * ca).r;
       c.b = texture2D(tDiffuse, vUv - dir * ca).b;
-      c.rgb *= 1.0 - smoothstep(0.45, 0.98, d) * 0.26;          // vignette
-      c.rgb += (rand(vUv * 917.0 + fract(uTime) * 7.0) - 0.5) * 0.018; // grain
+      c.rgb *= 1.0 - smoothstep(0.45, 0.98, d) * 0.26;
+      c.rgb += (rand(vUv * 917.0 + fract(uTime) * 7.0) - 0.5) * 0.018;
       gl_FragColor = c;
     }`,
 };
 
-// Pixel: Samana's signature "image breaking into blocks". The frame is
-// quantised into uPixel-sized blocks and mixed in by uMix — 0 at rest, so
-// the pass is free most of the time. The intro resolves out of it; bursts
-// and star flares pulse it.
 const PixelShader = {
   uniforms: {
     tDiffuse: { value: null },
@@ -139,29 +134,35 @@ const PixelShader = {
     }`,
 };
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
+let composer = null;
+let bloom = null;
+let pixel = null;
+let grade = null;
+if (quality.post !== 'none') {
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomRes =
+    quality.post === 'full'
+      ? new THREE.Vector2(window.innerWidth, window.innerHeight)
+      : new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2);
+  // strength / radius / threshold — 0.85 so ONLY true emitters (gold dots,
+  // the star, glow sprites) bloom; lit planets must never wash out
+  bloom = new UnrealBloomPass(bloomRes, 0.45, 0.7, 0.85);
+  composer.addPass(bloom);
+  if (quality.post === 'full') {
+    pixel = new ShaderPass(PixelShader);
+    composer.addPass(pixel);
+  }
+  grade = new ShaderPass(GradeShader);
+  composer.addPass(grade);
+  composer.addPass(new OutputPass());
+}
 
-const bloom = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.45, // strength — enough for the star to bleed, not enough to haze the rock
-  0.7, // radius
-  0.85 // threshold — ONLY true emitters (gold dots, the star, glow sprites) may bloom;
-       // lower values catch lit rock faces and wash the frame
-);
-composer.addPass(bloom);
-
-const pixel = new ShaderPass(PixelShader);
-composer.addPass(pixel);
-
-const grade = new ShaderPass(GradeShader);
-composer.addPass(grade);
-composer.addPass(new OutputPass());
-
-/* fx.pixelPulse: momentary pixel-break, shared with the interaction layer */
+/* fx.pixelPulse: momentary pixel-break, shared with the interaction layer.
+   A no-op on tiers without the pixel pass. */
 const fx = {
   pixelPulse(strength = 1, duration = 0.7) {
-    if (reduced) return;
+    if (reduced || !pixel) return;
     const u = pixel.uniforms;
     gsap.killTweensOf(u.uMix);
     gsap.killTweensOf(u.uPixel);
@@ -176,8 +177,8 @@ const interactions = createInteractions({ camera, refs, canvas, fx });
 createSheets({ lenis: scroll.lenis, fx, contact, view, reduced, coarse });
 
 /* ── Mouse parallax: the camera leans toward the cursor ─────────────────── */
-const pointer = { x: 0, y: 0 }; // -1..1
-const parallax = { x: 0, y: 0 }; // lerped
+const pointer = { x: 0, y: 0 };
+const parallax = { x: 0, y: 0 };
 let pointerActive = false;
 window.addEventListener('pointermove', (e) => {
   pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
@@ -185,9 +186,7 @@ window.addEventListener('pointermove', (e) => {
   pointerActive = true;
 });
 
-/* ── Custom cursor: a ring that answers whatever it crosses ─────────────
-   Fine pointers only. `hot` = something in the scene is clickable under
-   the ray (from interactions); `link` = a DOM control is under it. */
+/* ── Custom cursor: a ring that answers whatever it crosses ─────────────── */
 const cursorEl = document.querySelector('.cursor');
 const cursorPos = { x: -100, y: -100, tx: -100, ty: -100 };
 let cursorShown = false;
@@ -227,9 +226,7 @@ document.querySelectorAll('.rail-tick').forEach((tick) => {
   });
 });
 
-/* ── Cursor illumination: a pale gold lantern rides the cursor's ray ─────────── */
-// Positioned a fixed distance down the pointer ray, so whatever the cursor
-// crosses — planet, lattice, worlds — catches a soft gold side-light.
+/* ── Cursor illumination: a pale gold lantern rides the cursor's ray ────── */
 const cursorLight = new THREE.PointLight(0xf3dfa8, 0, 26, 2);
 scene.add(cursorLight);
 const cursorTarget = new THREE.Vector3();
@@ -239,12 +236,10 @@ function updateCursorLight() {
   cursorDir.set(pointer.x, -pointer.y, 0.5).unproject(camera).sub(camera.position).normalize();
   cursorTarget.copy(camera.position).addScaledVector(cursorDir, 9);
   cursorLight.position.lerp(cursorTarget, 0.12);
-  // ease the lantern in the first time the pointer shows up
   if (cursorLight.intensity < 3.5) cursorLight.intensity += (3.5 - cursorLight.intensity) * 0.03;
 }
 
-/* ── Framing: portrait screens get a wider lens so the rock and the peak
-   sit inside the frame instead of filling it ─────────────────────────── */
+/* ── Framing: portrait screens get a wider lens ─────────────────────────── */
 function frameCamera() {
   const aspect = window.innerWidth / window.innerHeight;
   camera.aspect = aspect;
@@ -253,14 +248,39 @@ function frameCamera() {
 }
 frameCamera();
 
-/* ── Resize ─────────────────────────────────────────────────────────────── */
+/* ── Resize + resolution ────────────────────────────────────────────────── */
+function applySize() {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(dpr);
+  if (composer) {
+    composer.setPixelRatio(dpr);
+    composer.setSize(window.innerWidth, window.innerHeight);
+  }
+  if (pixel) pixel.uniforms.uRes.value.set(window.innerWidth, window.innerHeight);
+}
 window.addEventListener('resize', () => {
   frameCamera();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr));
-  composer.setSize(window.innerWidth, window.innerHeight);
-  pixel.uniforms.uRes.value.set(window.innerWidth, window.innerHeight);
+  applySize();
 });
+
+/* Adaptive resolution: if the average frame keeps missing ~40 fps, step
+   the pixel ratio down a notch (never below 0.75). Cheap insurance for
+   phones and old laptops; it never steps back up, so it can't oscillate. */
+let frames = 0;
+let accum = 0;
+let last = performance.now();
+function watchFrameTime(now) {
+  accum += now - last;
+  last = now;
+  if (++frames < 90) return;
+  const avg = accum / frames;
+  frames = 0;
+  accum = 0;
+  if (avg > 26 && dpr > 0.75) {
+    dpr = Math.max(0.75, +(dpr - 0.25).toFixed(2));
+    applySize();
+  }
+}
 
 /* ── Frame loop ─────────────────────────────────────────────────────────── */
 const clock = new THREE.Clock();
@@ -272,27 +292,27 @@ function tick() {
   interactions.update(scroll.progress());
 
   if (!reduced && !coarse) {
-    // ease the parallax so the lean feels weighted, not twitchy
     parallax.x += (pointer.x * 0.55 - parallax.x) * 0.04;
     parallax.y += (pointer.y * 0.35 - parallax.y) * 0.04;
     camera.position.x += parallax.x;
     camera.position.y -= parallax.y;
   }
-  // a sheet is open: push toward the mountain along the camera's own axis
   if (view.dolly > 0.001) camera.translateZ(-view.dolly);
   updateCursorLight();
   updateCursor();
 
-  grade.uniforms.uTime.value = elapsed;
-  composer.render();
+  if (composer) {
+    grade.uniforms.uTime.value = elapsed;
+    composer.render();
+  } else {
+    renderer.render(scene, camera);
+  }
+  watchFrameTime(performance.now());
   requestAnimationFrame(tick);
 }
 tick();
 
-/* ── Arrival: greeting sequence on the light veil, then the lift ──────────
-   Samana-style hello loop: one greeting per language while the progress
-   line fills, then the veil slides up and the world resolves out of
-   pixel blocks. */
+/* ── Arrival: greeting sequence on the pale veil, then the lift ─────────── */
 const veil = document.querySelector('.veil');
 const greetingEl = document.querySelector('.veil-greeting');
 const barEl = document.querySelector('.veil-bar');
@@ -300,7 +320,7 @@ const countEl = document.querySelector('.veil-count');
 
 const GREETINGS = ['Hello', 'Salut', 'Hej', 'Ciao', 'Hola', 'こんにちは', 'Merhaba', 'Olá', '안녕하세요'];
 
-// The ASTRA starline is rasterised from the brand serif; once the webfont is
+// The ASTRO starline is rasterised from the brand serif; once the webfont is
 // actually in, lay the word out again so it is never the fallback face.
 document.fonts.ready.then(() => refs.trail.userData.relayout?.());
 
@@ -310,7 +330,6 @@ function reveal() {
     { opacity: 0 },
     { opacity: 1, duration: 1.2, delay: 0.7, ease: 'power2.out', stagger: 0.12 }
   );
-  // the name rises out of the blur one letter at a time, then the rest
   gsap.to('.statement-hero .ch', {
     opacity: 1,
     y: 0,
@@ -337,9 +356,8 @@ if (reduced) {
     reveal();
   });
 } else {
-  // greeting loop + progress line, minimum one full pass before lifting
   const intro = { p: 0 };
-  const STEP = 0.24; // seconds per greeting
+  const STEP = 0.24;
   const introDone = new Promise((resolve) => {
     const tl = gsap.timeline({ onComplete: resolve });
     GREETINGS.forEach((word, i) => {
@@ -364,8 +382,12 @@ if (reduced) {
 
   Promise.all([document.fonts.ready, introDone]).then(() => {
     // the world arrives mid-pixelation and resolves as the veil lifts
-    pixel.uniforms.uMix.value = 1;
-    pixel.uniforms.uPixel.value = 42;
+    if (pixel) {
+      pixel.uniforms.uMix.value = 1;
+      pixel.uniforms.uPixel.value = 42;
+      gsap.to(pixel.uniforms.uPixel, { value: 1, duration: 1.6, ease: 'power3.out', delay: 0.45 });
+      gsap.to(pixel.uniforms.uMix, { value: 0, duration: 1.7, ease: 'power2.inOut', delay: 0.45 });
+    }
     gsap.to(veil, {
       yPercent: -100,
       duration: 1.0,
@@ -373,8 +395,6 @@ if (reduced) {
       delay: 0.15,
       onComplete: () => (veil.style.display = 'none'),
     });
-    gsap.to(pixel.uniforms.uPixel, { value: 1, duration: 1.6, ease: 'power3.out', delay: 0.45 });
-    gsap.to(pixel.uniforms.uMix, { value: 0, duration: 1.7, ease: 'power2.inOut', delay: 0.45 });
     reveal();
   });
 }

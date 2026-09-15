@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   Astra Motions — Starlight design tokens
+   Astro Motions — Starlight design tokens
    Deep indigo void. One pale gold light: the star.
    ═══════════════════════════════════════════════════════════════════════ */
 :root {
@@ -824,4 +824,23 @@ button { font: inherit; color: inherit; }
   .statement-hero .ch { opacity: 1; transform: none; filter: none; }
   .hero-reveal { opacity: 1; transform: none; }
   .cursor { display: none; }
+}
+
+/* ── Touch devices: glass blurs over a live WebGL canvas cost whole frames
+   on phones, so the glass goes flat there. ─────────────────────────────── */
+@media (pointer: coarse) {
+  .cta, .header-contact, .contact-backdrop, .sheet-backdrop, .work-thumb .work-index {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .contact-backdrop { background: rgba(3, 4, 9, 0.86); }
+  .sheet-backdrop { background: linear-gradient(180deg, rgba(3, 4, 9, 0.94), rgba(3, 4, 9, 0.9)); }
+  .statement { will-change: opacity, transform; }
+}
+
+/* ── Narrow header: the serif wordmark and the nav share one row ──────── */
+@media (max-width: 720px) {
+  .header-name { font-size: 1.05rem; letter-spacing: 0.18em; }
+  .site-header .mark { width: 28px; }
+  .header-link { display: none; } /* the work sheet stays reachable from stages 4 and 6 */
 }

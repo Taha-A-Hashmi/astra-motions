@@ -14,6 +14,7 @@
    ═══════════════════════════════════════════════════════════════════════ */
 import * as THREE from 'three';
 import { BEATS, beatCenter } from './world.js';
+import { quality } from './quality.js';
 
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 const smooth = (v) => v * v * (3 - 2 * v); // smoothstep
@@ -40,7 +41,7 @@ export function createChoreography({ camera, refs }) {
   const camPath = new THREE.CatmullRomCurve3(waypoints, false, 'catmullrom', 0.4);
 
   /* ── The Guide's route: introduced at stage 3, then always a little
-     ahead of you — through the ASTRA starline, over the nebula, and
+     ahead of you — through the ASTRO starline, over the nebula, and
      finally into the star itself. */
   const c2 = beatCenter(2);
   const c3 = beatCenter(3);
@@ -104,7 +105,8 @@ export function createChoreography({ camera, refs }) {
       const center = i / (BEATS - 1);
       el.style.opacity = w.toFixed(3);
       el.style.transform = `translateY(${(center - p) * 260}px) scale(${(0.96 + 0.04 * w).toFixed(4)})`;
-      el.style.filter = w >= 0.999 ? 'none' : `blur(${((1 - w) * 7).toFixed(2)}px)`;
+      // the focus pull is a CSS blur — skipped on phones, where it costs frames
+      if (quality.blurStatements) el.style.filter = w >= 0.999 ? 'none' : `blur(${((1 - w) * 7).toFixed(2)}px)`;
       // don't intercept clicks when invisible (matters for the CTA)
       el.style.visibility = w <= 0.001 ? 'hidden' : 'visible';
     }

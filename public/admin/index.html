@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Site editor</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/admin/admin.css" />
+  </head>
+  <body>
+    <!-- ── Login ─────────────────────────────────────────────────────── -->
+    <section class="login" id="login" hidden>
+      <form class="login-card" id="login-form">
+        <img class="login-mark" src="/apple-touch-icon.png" alt="" width="44" height="44" />
+        <h1>Site editor</h1>
+        <p>Sign in with the editor password to change the site's text, links and SEO settings.</p>
+        <label>
+          <span>Editor password</span>
+          <input type="password" id="login-token" autocomplete="current-password" required />
+        </label>
+        <label class="login-remember"><input type="checkbox" id="login-remember" /> Stay signed in on this device</label>
+        <button class="btn btn-primary" type="submit">Sign in</button>
+        <p class="login-err" id="login-err" hidden></p>
+      </form>
+    </section>
+
+    <!-- ── App ───────────────────────────────────────────────────────── -->
+    <div class="app" id="app" hidden>
+      <aside class="side">
+        <div class="side-brand">
+          <img src="/apple-touch-icon.png" alt="" width="28" height="28" />
+          <span id="side-name">Site editor</span>
+        </div>
+        <nav class="side-nav" id="side-nav"></nav>
+        <div class="side-foot">
+          <a href="/" target="_blank" rel="noopener">View site ↗</a>
+          <button type="button" id="logout">Sign out</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1 id="section-title">Site &amp; SEO</h1>
+            <p class="topbar-status" id="status">All changes saved</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn" type="button" id="discard" disabled>Discard</button>
+            <button class="btn btn-primary" type="button" id="save" disabled>Save changes</button>
+          </div>
+        </header>
+        <div class="content" id="content"></div>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+    <script src="/admin/admin.js"></script>
+  </body>
+</html>

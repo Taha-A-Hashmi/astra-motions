@@ -1,14 +1,14 @@
 /* ═══════════════════════════════════════════════════════════════════════
    interactions.js — the cursor is a physical presence in the world.
 
-     · Planet (stage 1): hover cracks it open a little; click bursts it
-       apart (with a pixel-break pulse) and lets it reassemble.
+     · Planet (stage 1): hover warms it and brightens its ring; click
+       sends a shockwave out through the ring (with a pixel-break pulse).
      · The Guide (stage 3+): shies away from the cursor's ray; click near
        it and it lights up, spinning its halo.
-     · Starline (stage 4): the ASTRA constellation is pushed by the cursor
+     · Starline (stage 4): the ASTRO constellation is pushed by the cursor
        AND by the Guide flying through; click detonates a shockwave.
      · The star (stage 6): click flares it.
-     The stage-2 lattice is deliberately non-interactive.
+     The stage-2 belt is deliberately non-interactive.
 
    All of it runs off one Raycaster updated per frame in update().
    ═══════════════════════════════════════════════════════════════════════ */
@@ -26,34 +26,31 @@ export function createInteractions({ camera, refs, canvas, fx }) {
     hasPointer = true;
   });
 
-  /* ── Shard: hover-crack + click-burst ───────────────────────────────── */
+  /* ── Planet: hover-warm + click-shockwave ───────────────────────────── */
   let hovering = false;
-  let bursting = false;
+  let pulsing = false;
+  const planetMat = refs.planet.material;
+  const bandMat = refs.heroBand.material;
 
-  function setSep(value, opts) {
-    for (const chunk of refs.shardChunks) {
-      gsap.to(chunk.userData, { sep: value, overwrite: 'auto', ...opts });
-    }
+  function setWarm(on) {
+    gsap.to(planetMat, { emissiveIntensity: on ? 0.18 : 0, duration: 0.5, ease: 'power2.out', overwrite: 'auto' });
+    gsap.to(bandMat, { opacity: on ? 0.8 : 0.5, duration: 0.5, ease: 'power2.out', overwrite: 'auto' });
   }
 
-  function burst() {
-    if (bursting) return;
-    bursting = true;
-    fx.pixelPulse(1, 0.7); // the frame itself breaks with the rock
-    // flash the moon-dot light with the impact
+  function shock() {
+    if (pulsing) return;
+    pulsing = true;
+    fx.pixelPulse(0.8, 0.6); // the frame itself breaks with the wave
     gsap.fromTo(
       refs.heroDotLight,
       { intensity: 14 },
-      { intensity: 46, duration: 0.18, yoyo: true, repeat: 1, ease: 'power2.out' }
+      { intensity: 40, duration: 0.18, yoyo: true, repeat: 1, ease: 'power2.out' }
     );
-    for (const chunk of refs.shardChunks) {
-      const out = 1.3 + Math.random() * 1.2;
-      gsap
-        .timeline({ overwrite: 'auto' })
-        .to(chunk.userData, { sep: out, duration: 0.55, ease: 'power3.out' })
-        .to(chunk.userData, { sep: 0, duration: 1.5, ease: 'elastic.out(1, 0.55)' });
-    }
-    gsap.delayedCall(2.1, () => (bursting = false));
+    gsap.fromTo(
+      refs.planet.userData,
+      { pulse: 0 },
+      { pulse: 1, duration: 1.4, ease: 'power2.out', overwrite: 'auto', onComplete: () => (pulsing = false) }
+    );
   }
 
   /* ── Guide delight: click near the wisp and it lights up ─────────────── */
@@ -62,13 +59,9 @@ export function createInteractions({ camera, refs, canvas, fx }) {
     fx.pixelPulse(0.4, 0.45);
   }
 
-  /* ── Star flare: the star answers a click ─────────────────────── */
+  /* ── Star flare: the star answers a click ────────────────────────────── */
   function flare() {
-    gsap.fromTo(
-      refs.star,
-      { flare: 46 },
-      { flare: 0, duration: 1.6, ease: 'power2.out', overwrite: 'auto' }
-    );
+    gsap.fromTo(refs.star, { flare: 46 }, { flare: 0, duration: 1.6, ease: 'power2.out', overwrite: 'auto' });
     fx.pixelPulse(0.6, 0.6);
   }
 
@@ -77,7 +70,6 @@ export function createInteractions({ camera, refs, canvas, fx }) {
     const trail = refs.trail;
     const base = trail.userData.base;
     const push = trail.userData.push;
-    // blast center: the ray's closest approach to the trail's center
     raycaster.ray.closestPointToPoint(trail.userData.center, closest);
     for (let i = 0; i < base.length; i += 3) {
       const dx = base[i] - closest.x;
@@ -94,18 +86,17 @@ export function createInteractions({ camera, refs, canvas, fx }) {
     fx.pixelPulse(0.45, 0.5);
   }
 
+  const starTargets = () => [refs.star.core, refs.star.ring, ...refs.star.planets];
+
   let lastP = 0; // scroll progress mirrored from update()
   window.addEventListener('pointerdown', (e) => {
     ndc.x = (e.clientX / window.innerWidth) * 2 - 1;
     ndc.y = -(e.clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(ndc, camera);
-    if (raycaster.intersectObjects(refs.shardChunks).length) return burst();
-    if (
-      refs.guide.visible > 0.5 &&
-      raycaster.ray.distanceToPoint(refs.guide.head.position) < 1.5
-    )
+    if (lastP < 0.15 && raycaster.intersectObject(refs.planet).length) return shock();
+    if (refs.guide.visible > 0.5 && raycaster.ray.distanceToPoint(refs.guide.head.position) < 1.5)
       return delight();
-    if (raycaster.intersectObjects([refs.star.core, refs.star.ring, ...refs.star.planets]).length) return flare();
+    if (lastP > 0.8 && raycaster.intersectObjects(starTargets()).length) return flare();
     if (Math.abs(lastP - 3 / 5) < 0.14) shockwave();
   });
 
@@ -120,22 +111,23 @@ export function createInteractions({ camera, refs, canvas, fx }) {
     raycaster.setFromCamera(ndc, camera);
     const ray = raycaster.ray;
 
-    /* Shard hover (only meaningful near the hero, p < ~0.15) */
-    if (p < 0.15 && !bursting) {
-      const hit = raycaster.intersectObjects(refs.shardChunks).length > 0;
+    /* Planet hover (only meaningful near the pad, p < ~0.15) */
+    if (p < 0.15) {
+      const hit = raycaster.intersectObject(refs.planet).length > 0;
       if (hit !== hovering) {
         hovering = hit;
-        setSep(hit ? 0.14 : 0, { duration: 0.5, ease: 'power2.out' });
+        setWarm(hit);
       }
     } else if (hovering) {
       hovering = false;
+      setWarm(false);
     }
 
     /* One cursor decision for everything clickable */
     hot =
       hovering ||
       (refs.guide.visible > 0.5 && ray.distanceToPoint(refs.guide.head.position) < 1.5) ||
-      (p > 0.8 && raycaster.intersectObjects([refs.star.core, refs.star.ring, ...refs.star.planets]).length > 0);
+      (p > 0.8 && raycaster.intersectObjects(starTargets()).length > 0);
     canvas.style.cursor = hot ? 'pointer' : '';
 
     /* The Guide shies away from the cursor's ray, then drifts back */
@@ -148,12 +140,12 @@ export function createInteractions({ camera, refs, canvas, fx }) {
         g.shy.add(away);
         g.shy.clampLength(0, 2.4);
       }
-      g.shy.multiplyScalar(0.94); // spring home
+      g.shy.multiplyScalar(0.94);
     }
 
     /* Starline particles: pushed by the cursor ray AND by the Guide */
     const trail = refs.trail;
-    const wActive = Math.abs(p - 3 / 5) < 0.14; // only near beat 3
+    const wActive = Math.abs(p - 3 / 5) < 0.14;
     if (wActive) {
       const posAttr = trail.geometry.attributes.position;
       const arr = posAttr.array;
@@ -163,7 +155,6 @@ export function createInteractions({ camera, refs, canvas, fx }) {
       const guideNear = refs.guide.visible > 0.1;
       for (let i = 0; i < arr.length; i += 3) {
         closest.set(base[i], base[i + 1], base[i + 2]);
-        // world ≈ local here (the points never move as a group)
         ray.closestPointToPoint(closest, away);
         let dx = base[i] - away.x;
         let dy = base[i + 1] - away.y;
@@ -175,7 +166,6 @@ export function createInteractions({ camera, refs, canvas, fx }) {
           push[i + 1] += dy * f;
           push[i + 2] += dz * f;
         }
-        // the Guide leaves a wake as it flies through the word
         if (guideNear) {
           dx = base[i] - gh.x;
           dy = base[i + 1] - gh.y;
